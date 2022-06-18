@@ -5,10 +5,12 @@ Converts WebP file(s) to png, bmp, etc.
 
 ## Usage:
 1. Select output type. PNG is default.
-2. Select one or more files using the "Browse" button.
-3. If needed. Rename output files. If not changed, output files will have the same name but with differend extension.
+2. Select one or more files using the "Browse Files" button.
+3. Select one or more directories using the "Browse Dirs" button. This will add top-level files in the selected directories.
+4. If needed. Rename output files. If not changed, output files will have the same name but with differend extension.
 Example: image.webp will convert to image.png.
-4. Press the "Convert" button. If Google's webp tools are not found it will ask if you want to download the tools.
+5. If you want to delete converted files, check the "Delete Converted" checkbox.
+6. Press the "Convert" button. If Google's webp tools are not found it will ask if you want to download the tools.
 Done.
 
 # Format
