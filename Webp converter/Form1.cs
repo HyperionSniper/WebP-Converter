@@ -12,6 +12,9 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
+using AnyAscii;
+using Ookii.Dialogs.Wpf;
+
 namespace Webp_converter
 {
     public partial class Form1 : Form
@@ -28,7 +31,7 @@ namespace Webp_converter
             outputType.SelectedIndex = 0; //Make sure to select the first item instead of "BLANK".
         }
 
-        private void InputButton_Click(object sender, EventArgs e)
+        private void FilesInputButton_Click(object sender, EventArgs e)
         {
             OpenFileDialog inputFileDialog = new OpenFileDialog();
             inputFileDialog.Filter = "Image files (*.webp)|*.webp|All files (*.*)|*.*";
@@ -37,12 +40,32 @@ namespace Webp_converter
 
             if (inputFileDialog.ShowDialog() == DialogResult.OK)
             {
-                InputTextbox.Clear(); //Clear previous selection / files.
+                FilesInputTextbox.Clear(); //Clear previous selection / files
+                convertTextbox.Clear(); //Clear previous selection / files.
                 foreach (string filePath in inputFileDialog.FileNames)
                 {
-                    InputTextbox.Text += filePath + ";";
+                    FilesInputTextbox.Text += filePath + ";";
                     convertTextbox.Text += filePath.Replace(".webp", $".{outputType.SelectedItem.ToString()};");
                     //MessageBox.Show(filePath);
+                }
+            }
+        }
+
+        private void DirsInputButton_Click(object sender, EventArgs e) {
+            VistaFolderBrowserDialog dialog = new VistaFolderBrowserDialog();
+            dialog.Multiselect = true; ;
+            dialog.UseDescriptionForTitle = true;
+            dialog.Description = "Select folder(s)";
+
+            if (dialog.ShowDialog() == true) {
+                DirsInputTextbox.Clear(); //Clear previous selection / files
+                convertTextbox.Clear(); //Clear previous selection / files.
+
+                foreach (string dirPath in dialog.SelectedPaths) {
+                    DirsInputTextbox.Text += dirPath + ";";
+                    foreach (var filePath in Directory.GetFiles(dirPath, "*", SearchOption.TopDirectoryOnly)) {
+                        convertTextbox.Text += filePath.Replace(".webp", $".{outputType.SelectedItem.ToString()};");
+                    }
                 }
             }
         }
@@ -59,23 +82,85 @@ namespace Webp_converter
 
         private void ConvertButton_Click(object sender, EventArgs e)
         {
-            if(CheckTools())
-                Convert();
+
+            if(CheckTools()){
+                List<string> inputArray = new List<string>(FilesInputTextbox.Text.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)); //Remove empty entries using filter.
+                List<string> outputArray = new List<string>();
+
+                string[] inputDirsArray = DirsInputTextbox.Text.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries); //Remove empty entries using filter.
+
+                Status("Checking dirs");
+                for (int i = 0; i < inputDirsArray.Length; i++) {
+                    var dir = inputDirsArray[i];
+                    int count = 0;
+                    foreach (var file in Directory.GetFiles(dir, "*", SearchOption.TopDirectoryOnly)) {
+                        inputArray.Add(file);
+                        count++;
+                    }
+                    Console.WriteLine($"Checking directory {dir}, found {count} files.");
+                }
+
+                List<string> newInputArray = new List<string>();
+                List<string> newOutputArray = new List<string>();
+
+                Status($"Getting converted file paths{(DeleteConverted.Checked ? " and deleting converted files" : "")}.");
+                for (int n = 0; n < inputArray.Count; n++) {
+                    var inPath = inputArray[n];
+
+                    // if unicode name
+                    if (Encoding.UTF8.GetByteCount(inPath) != inPath.Length) {
+                        newInputArray.Add(Path.GetTempFileName());
+                        newOutputArray.Add(Path.GetTempFileName());
+                    }
+                    else {
+                        newInputArray.Add(null);
+                        newOutputArray.Add(null);
+                    }
+
+                    // get original output path
+                    outputArray.Add(inputArray[n].Replace(".webp", $".{outputType.SelectedItem.ToString()}"));
+                }
+
+                Convert(inputArray.ToArray(), outputArray.ToArray(), newInputArray.ToArray(), newOutputArray.ToArray());
+            }
         }
 
-        private void Convert()
+        public void Convert(string[] originalInputArray, string[] originalOutputArray, string[] inputArray, string[] outputArray)
         {
-            string[] inputArray = InputTextbox.Text.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries); //Remove empty entries using filter.
-            string[] outputArray = convertTextbox.Text.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-
             int currentProcessCount = 0;
 
+            convertTextbox.Clear();
+
+            List<Process> processes = new List<Process>();
+
+            bool elevated = false; 
+
+            bool deleteConverted = DeleteConverted.Checked;
+            int successes = 0;
+            int failsToInvalidInput = 0;
+            int failsToMismatch = 0;
             for (int i = 0; i < inputArray.Length; i++)
             {
-                if (inputArray.Length == outputArray.Length) //if arrays arren't the same size something went wrong. (Need output path & name)
+                if (originalInputArray.Length == originalOutputArray.Length) //if arrays arren't the same size something went wrong. (Need output path & name)
                 {
-                    if (inputArray[i].Length > 0 && outputArray[i].Length > 0) //Array can't be null or empty.
+                    string input = originalInputArray[i];
+                    string output = originalOutputArray[i];
+
+                    if (input.Length > 0 && output.Length > 0) //Array can't be null or empty.
                     {
+                        bool copyTempFile = inputArray[i] != null;
+
+                        if (copyTempFile) {
+                            input = inputArray[i];
+                            output = outputArray[i];
+
+                            if (elevated || !File.Exists(inputArray[i])) {
+                                File.Copy(originalInputArray[i], inputArray[i], true);
+                            }
+                        }
+
+                        convertTextbox.Text += input + "=>" + output + "\n";
+
                         string extraParameter = "";
 
                         if (outputType.SelectedItem.ToString() != "png") //png is default so no parameters needed. if changed, add parameters.
@@ -84,26 +169,52 @@ namespace Webp_converter
                         }
                         Process dwebp = new Process();
                         dwebp.StartInfo.FileName = $"{Environment.CurrentDirectory}/bin/bin/dwebp.exe";
-                        dwebp.StartInfo.Arguments = $"\"{inputArray[i]}\" {extraParameter} -o \"{outputArray[i]}\"";
+                        dwebp.StartInfo.Arguments = $"\"{input}\" {extraParameter} -o \"{output}\"";
                         dwebp.StartInfo.WindowStyle = ProcessWindowStyle.Hidden; //Hide windows so you dont get console windows spam when converting 100+ files.
                         dwebp.EnableRaisingEvents = true; //To enable .Exited call.
+
                         dwebp.Exited += (s, e) => //Count when process is done and decrease process count.
                         {
                             currentProcessCount--;
+
+                            bool isTemp = copyTempFile;
+                            if (isTemp) {
+                                int index = i;
+
+                                if (elevated || !File.Exists(originalOutputArray[index])) {
+                                    File.Copy(outputArray[index], originalOutputArray[index], elevated);
+                                }
+
+                                if (elevated) {
+                                    File.Delete(inputArray[index]);
+                                    File.Delete(outputArray[index]);
+                                }
+                            }
+
+                            if (deleteConverted) {
+                                //File.Delete(originalInputArray[i]);
+                            }
+
+                            successes++;
                         };
+
+                        processes.Add(dwebp);
                         dwebp.Start();
                         currentProcessCount++; //Add process because it just started another one.
 
                         if (currentProcessCount >= maxProcesses) //When max processes reached. wait for processes to finish before starting more.
                             dwebp.WaitForExit(); //Wait for process to finish before continueing.
-                            
+
                         //Maybe add "Max Process count" so you can run 10 instances at the same time?
                         float procDone = (float)(100 / (float)inputArray.Length) * (float)(i + 1); //Thats a lot of floats!.... yep.. the calculations doesn't work if its not float. the 100 / lenght returns 0 because it thinks its a INT...
-                        StatusStripLabel.Text = $"Converting {i+1}/{inputArray.Length} {(int)procDone}%"; // i + 1 because arrays start at 0... Also converting the float to int for readability.
+                        Status($"Converting {i + 1}/{inputArray.Length} {(int)procDone}%"); // i + 1 because arrays start at 0... Also converting the float to int for readability.
                     }
+                    else failsToInvalidInput++;
                 }
+                else failsToMismatch ++;
             }
-            StatusStripLabel.Text = "Done converting.";
+
+            Status($"Done converting: {(successes == inputArray.Length && successes != 0 ? "SUCCESS" : "FAIL")}; {successes}/{inputArray.Length} successes; Mismatched: {failsToMismatch}; Invalid: {failsToInvalidInput}");
         }
 
         private void outputType_SelectedIndexChanged(object sender, EventArgs e)
@@ -144,14 +255,19 @@ namespace Webp_converter
                             var readAchrive = ZipFile.OpenRead("tools.zip"); //Zip to var because it doesn't fk close it on its own ffs.
                             string oldFolderName = readAchrive.Entries.First().ToString(); //Get foldername. could all be one line BUT NOOOOO it doesnt fkn auto close
                             readAchrive.Dispose(); //Have to dispose of this shit because IT DOESN'T FKN AUTO CLOSE! File.Delete can't delete because "File in use..." RIP one-liner ;(
-                            StatusStripLabel.Text = "Extracting zip...";
+
+                            Status("Extracting zip...");
                             ZipFile.ExtractToDirectory("tools.zip", "./");
-                            StatusStripLabel.Text = "Done extracting. Renaming folder and deleting download file.";
+                            
+                            Status("Done extracting. Renaming folder and deleting download file.");
                             Directory.Move(oldFolderName, "bin");
 
                             File.Delete("tools.zip");
-                            StatusStripLabel.Text = "Done.";
-                            Convert();
+                            Status("Done.");
+
+                            //string[] inputArray = FilesInputTextbox.Text.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries); //Remove empty entries using filter.
+                            //string[] outputArray = convertTextbox.Text.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                            //Convert(inputArray, outputArray);
                         };
 
 
@@ -169,7 +285,7 @@ namespace Webp_converter
                 }
                 else
                 {
-                    StatusStripLabel.Text = "Can't convert without tools.";
+                    Status("Can't convert without tools.");
                     return false;
                 }
             }
@@ -179,6 +295,11 @@ namespace Webp_converter
             }
         }
 
+        private void Status(string status) {
+            if(StatusStripLabel != null)
+                StatusStripLabel.Text = status;
+        }
+
         private void StatusStrip_ItemClicked(object sender, ToolStripItemClickedEventArgs e)
         {
 
@@ -186,6 +307,14 @@ namespace Webp_converter
 
         private void StatusStripLabel_Click(object sender, EventArgs e)
         {
+
+        }
+
+        private void DirsInputTextbox_TextChanged(object sender, EventArgs e) {
+
+        }
+
+        private void TrueOutputTextbox_TextChanged(object sender, EventArgs e) {
 
         }
     }
